@@ -85,16 +85,17 @@ Une fois que l'authentification mutuelle est réalisée, le client envoi ses aut
 \subsection{La structure TSRequest}
 Les échanges CredSSP sont réalisés via la structure TSRequest pour réaliser l'authentification mutuelle.
 
-\begin{figure}[ht]
-  \centering
-  \ifssticbw
-    \includegraphics[width=0.4\textwidth]{MonNom/img/bw-archi}
-  \else
-    \includegraphics[width=0.4\textwidth]{MonNom/img/archi}
-  \fi
-  \caption{Légende de l'image}
-  \label{fig:monnom:archi}
-\end{figure}
+\begin{lstlisting}[frame=single,basicstyle=\tiny]
+TSRequest :== SEQUENCE {
+	Version     [0] INTEGER,
+	negoToken   [1] NegoData OPTIONNAL,
+	authInfo    [2] OCTET STRING OPTIONNAL,
+	pubKeyAuth  [3] OCTET STRING OPTIONNAL,
+	errorCode   [4] OCTET STRING OPTIONNAL,
+	clientNonce [5] OCTET STRING OPTIONNAL
+	}
+\end{lstlisting}
+
 
 \begin{itemize}
 	\item Version: Indique la version du protocole à utiliser. Depuis la vulnérabilité CVE-2018-0886, les clients sont censés refuser les versions 5 et inférieures de CredSSP. Cependant il a été constaté que depuis l’update d’octobre 2019, la version 2 de CredSSP peut de nouveau être utiliséé, réintroduisant potentiellement une vulnérabilité de type Remote Code Execution (mais des analyses sont encore nécessaires de notre part). La suite de ce document considérera une utilisation de la version 6 du protocole.
@@ -109,47 +110,38 @@ Les échanges CredSSP sont réalisés via la structure TSRequest pour réaliser 
 
 Etape 5: Le client envoie la requête suivante:
 
-\begin{figure}[ht]
-  \centering
-  \ifssticbw
-    \includegraphics[width=0.4\textwidth]{MonNom/img/bw-archi}
-  \else
-    \includegraphics[width=0.4\textwidth]{MonNom/img/archi}
-  \fi
-  \caption{Légende de l'image}
-  \label{fig:monnom:archi}
-\end{figure}
+\begin{lstlisting}[frame=single,basicstyle=\tiny]
+TSRequest {
+	Version:     6,
+	negoToken:   NegoData-> NTLMSSPType1Message
+	}
+\end{lstlisting}
 
 Le message NTLMSSPType1 contient des informations nécessaires pour l’établissement d’un échange NTLMSSP, ainsi que notamment des informations sur la version de NTLMSSP et les paramétrages souhaités par le client.
 
 Étape 6: Le serveur répond comme suit:
 
-\begin{figure}[ht]
-  \centering
-  \ifssticbw
-    \includegraphics[width=0.4\textwidth]{MonNom/img/bw-archi}
-  \else
-    \includegraphics[width=0.4\textwidth]{MonNom/img/archi}
-  \fi
-  \caption{Légende de l'image}
-  \label{fig:monnom:archi}
-\end{figure}
+\begin{lstlisting}[frame=single,basicstyle=\tiny]
+TSRequest {
+	Version:     6,
+	negoToken:   NegoData-> NTLMSSPType2Message
+	}
+\end{lstlisting}
+
 
 Le message NTLMSSPType2 contient les informations de challenge NTLM : NTLMChallenge, Nom du serveur, Nom du domaine
 
 Étape 7 :
-Le client envoi maintenant la réponse NTLMv2 :
+Le client envoi maintenant la réponse NTLMv2 ainsi qu'une signature du certificat TLS présenté afin d'initer l'authentification mutuelle :
 
-\begin{figure}[ht]
-  \centering
-  \ifssticbw
-    \includegraphics[width=0.4\textwidth]{MonNom/img/bw-archi}
-  \else
-    \includegraphics[width=0.4\textwidth]{MonNom/img/archi}
-  \fi
-  \caption{Légende de l'image}
-  \label{fig:monnom:archi}
-\end{figure}
+\begin{lstlisting}[frame=single,basicstyle=\tiny]
+TSRequest {
+	Version:     6,
+	negoToken:   NegoData-> NTLMSSPType3Message,
+	pubKeyAuth: Signature + encryptedCertificate,
+	clientNonce: Octet String
+	}
+\end{lstlisting}
 
 Le message NTLMSSPType3 contient la réponse au challenge NTLM contenant:
 \begin{itemize}
@@ -164,18 +156,14 @@ Le Nonce est renvoyé dans le champ ClientNonce.
 \textbf{À cette étape, un attaquant effectuant une attaque de type Man-In-The-Middle a récupéré une réponse NTLMv2 de sa victime sans lever aucune alerte de sécurité. Cette empreinte peut être cassée ou utilisée pour des attaques de type SMB Relay}
 % Exemples de listes  à points
 
-Étape 8: À cette étape, le serveur prouve son identité auprès du client. Pour ce faire, il envoie la requête suivante:
+Étape 8: À cette étape, le serveur vérifie le certificat TLS vu par le client puis prouve son identité auprès du client. Pour ce faire, il envoie la requête suivante:
 
-\begin{figure}[ht]
-  \centering
-  \ifssticbw
-    \includegraphics[width=0.4\textwidth]{MonNom/img/bw-archi}
-  \else
-    \includegraphics[width=0.4\textwidth]{MonNom/img/archi}
-  \fi
-  \caption{Légende de l'image}
-  \label{fig:monnom:archi}
-\end{figure}
+\begin{lstlisting}[frame=single,basicstyle=\tiny]
+TSRequest {
+	Version:     6,
+	pubKeyAuth: Signature + encryptedCertificate,
+	}
+\end{lstlisting}
 
 Le champ pubKeyAuth contient le chiffrement RC4 du SHA256 de (’CredSSP Server-To-Client Binding Hash’ + Nonce + PublicKey du certificat)) chiffrer avec la RandomSessionKey.
 Pour effectuer cette requête, le serveur doit être en connaissance de la RandomSessionKey. Celle-ci est récupérée auprès du Domain Controller. Pour qu’un attaquant puisse mettre en place une attaque de type Man-In-The-Middle, il doit donc être en mesure de récupérer cette RandomSessionKey. Pour cela il lui suffit d’avoir un compte machine valide au sein du domaine.
@@ -188,16 +176,13 @@ NB : Si l’attaquant possède un compte machine, il est facile pour lui d’ob
 Après présentation de l’erreur de certificat, l’authentification recommence et va juste à l’étape 9.
 À l’étape 9 le client envoie la requête suivante :
 
-\begin{figure}[ht]
-  \centering
-  \ifssticbw
-    \includegraphics[width=0.4\textwidth]{MonNom/img/bw-archi}
-  \else
-    \includegraphics[width=0.4\textwidth]{MonNom/img/archi}
-  \fi
-  \caption{Légende de l'image}
-  \label{fig:monnom:archi}
-\end{figure}
+\begin{lstlisting}[frame=single,basicstyle=\tiny]
+TSRequest {
+	Version:     6,
+	authInfo: Signature + cryptedCreds,
+	}
+\end{lstlisting}
+
 
 CryptedCreds contient les secrets d’authentifications de l’utilisateur chiffré via RC4 avec la RandomSessionKey.
 
@@ -208,32 +193,26 @@ Cependant il est possible de partiellement downgrader la connexion pour revenir 
 Étape 5 :
 Le client envoi maintenant la TSRequest suivante :
 
-\begin{figure}[ht]
-  \centering
-  \ifssticbw
-    \includegraphics[width=0.4\textwidth]{MonNom/img/bw-archi}
-  \else
-    \includegraphics[width=0.4\textwidth]{MonNom/img/archi}
-  \fi
-  \caption{Légende de l'image}
-  \label{fig:monnom:archi}
-\end{figure}
+\begin{lstlisting}[frame=single,basicstyle=\tiny]
+TSRequest {
+	Version:     6,
+	NegoToken: Kerberos,
+	}
+\end{lstlisting}
+
 
 On remarque que le client ne propose que Kerberos. Même si celui-ci supporte NTLMSSP, il ne le propose pas comme option auprès du serveur.
 
 Étape 6: 
 Il est tout de même possible pour un attaquant de répondre à l'aide du message malformé suivant afin de downgrader la communication sur NTLMSSP. La TSRequest suivante permet d'obtenir ce résultat :
 
-\begin{figure}[ht]
-  \centering
-  \ifssticbw
-    \includegraphics[width=0.4\textwidth]{MonNom/img/bw-archi}
-  \else
-    \includegraphics[width=0.4\textwidth]{MonNom/img/archi}
-  \fi
-  \caption{Légende de l'image}
-  \label{fig:monnom:archi}
-\end{figure}
+\begin{lstlisting}[frame=single,basicstyle=\tiny]
+TSRequest {
+	Version:     6,
+	NegoToken: \xa1\x...NTLMSSP\x00\x00...\x0f,
+	}
+\end{lstlisting}
+
 
 Cette requête malformée a été obtenue en analysant la réponse d'un serveur ayant été retiré d'un domaine mais dont le FQDN a été inséré manuellement dans le fichier "hosts" du client. Cette réponse est donc la réponse apportée par un serveur incapable de réaliser une connexion NLA via Kerberos.
 
@@ -254,30 +233,30 @@ Suite à cette réponse, le client va autoriser la connexion via NTLMSSP mais le
 Étape 5 (bis) :
 Le client envoye par la suite un message NTLMSSPType1 mais en l'insérant dans le champ AuthInfo (en lieu et palce du champ NegoToken normalement utilisé):
 
-\begin{figure}[ht]
-  \centering
-  \ifssticbw
-    \includegraphics[width=0.4\textwidth]{MonNom/img/bw-archi}
-  \else
-    \includegraphics[width=0.4\textwidth]{MonNom/img/archi}
-  \fi
-  \caption{Légende de l'image}
-  \label{fig:monnom:archi}
-\end{figure}
+\begin{lstlisting}[frame=single,basicstyle=\tiny]
+TSRequest {
+	Version:     6,
+	NegoToken: TSRequest{
+		Version: 1
+		AuthInfo : NTLMSSType1 message
+		}
+	}
+\end{lstlisting}
+
 
 Étape 6 (bis) :
 En respsectant ce "nouveau" mode de fonctionnement, il est possible de répondre de la même manière pour envoyer un message NTLMSSPType2 auprès du client :
 
-\begin{figure}[ht]
-  \centering
-  \ifssticbw
-    \includegraphics[width=0.4\textwidth]{MonNom/img/bw-archi}
-  \else
-    \includegraphics[width=0.4\textwidth]{MonNom/img/archi}
-  \fi
-  \caption{Légende de l'image}
-  \label{fig:monnom:archi}
-\end{figure}
+\begin{lstlisting}[frame=single,basicstyle=\tiny]
+TSRequest {
+	Version:     6,
+	NegoToken: TSRequest{
+		Version: 1
+		AuthInfo : NTLMSSType2 message
+		}
+	}
+\end{lstlisting}
+
 
 Étape 7 :
 Le client continue l'échange jusqu'à cette étape et \textbf{va donc envoyer une réponse NTLMSSPType3 contenant la réponse NTLMv2 toujours sans message d’erreur sur le certificat et alors que celui-ci avait forcé l’utilisation de Kerberos. Cette empreinte peut ensuite être cassée ou utilisée pour des attaques de type SMB Relay}
